@@ -92,3 +92,62 @@ Protocol highlights:
 The CSV reports spectral/Frobenius differences for both the raw and projected
 models, indexed by `(length, base_index, epsilon)` along with the actual prefix
 and suffix sample sizes.
+
+## Running Experiment 4
+
+Experiment 4 instantiates the analytic hard examples from §7.2A/§7.2B (rank-1
+and rank-3 diagonal MPS), tracks Hankel singular values across lengths, and
+simulates a Hankel spectral-learning pipeline (rank-truncated SVD + whitening +
+masked transitions) on finite samples to expose how conditioning impacts sample
+complexity.
+
+```bash
+python experiments/exp4_condition_numbers.py \
+  --lengths 6,10,14 \
+  --eta 0.6 \
+  --c-param 0.5 \
+  --sample-sizes 200,1000,5000 \
+  --trials 5 \
+  --seed 0 \
+  --output experiments/exp4_results.csv
+```
+
+Outputs per `(model, length, sample_size, trial)` include the leading three
+singular values (with `log_sigma3` for exponential-decay fits), spectral and
+Frobenius errors of empirical Hankel estimates, the smallest singular value of
+the empirical Hankel used for whitening, and downstream spectral-learning
+metrics: total-variation and pointwise max error of the WFA-style reconstruction
+over all length-`L` strings. The contrast between the rank-1 and rank-3 cases
+highlights the `N \gtrsim \mu/\sigma_{\min}^2` dependence from §7.3.
+
+## Running Experiment 5
+
+Experiment 5 implements the end-to-end Hankel spectral-learning pipeline from
+Chs. 9–11, sweeping sample sizes and sequence lengths while comparing raw
+spectral recovery against a row-substochastic projection that enforces the
+contractive regime (`G_L(κ)≈L`). The expanded version supports multiple ground
+truths (low-rank MPS, higher-entropy MPS, and a contractive WFA), records
+coherence/`gamma`/`kappa_B`, and reports scaled errors `gamma/F(L)` to match the
+theoretical bound.
+
+```bash
+python experiments/exp5_sample_complexity.py \
+  --lengths 8,10 \
+  --sample-sizes 1000,3000,10000 \
+  --models low,high,contractive \
+  --bond-low 2 \
+  --bond-high 4 \
+  --wfa-dim 3 \
+  --rank 4 \
+  --trials 5 \
+  --seed 0 \
+  --output experiments/exp5_results.csv
+```
+
+Per configuration `(model, length, sample_size, trial)` the script records true
+rank, `gamma`, coherence `mu`, `kappa_B`, Hankel deviation `delta_hankel`,
+empirical `sigma_min`, and downstream errors (TV and max) for both the raw WFA
+and the contractive projection. Scaled errors (`scaled_error_* = error *
+gamma / F(L)`) and the prefix/suffix/evaluation sizes are included to facilitate
+the 5a/5b analyses (error vs. `N`, error vs. `L`) under both geometric and
+contractive regimes.
