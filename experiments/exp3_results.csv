@@ -1,0 +1,2 @@
+length,t_star,bond_dim,base_index,epsilon,num_prefixes,num_suffixes,hankel_diff_spec,hankel_diff_fro,hankel_diff_spec_proj,hankel_diff_fro_proj
+5,2,3,0,0.001,4,8,0.00023022111096846938,0.0008861171009737684,9.297895673350954e-05,0.00017091336046430312

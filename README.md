@@ -54,10 +54,41 @@ python experiments/exp2_truncation.py \
   --output experiments/exp2_results.csv
 ```
 
-Key outputs per `(length, base_index, D_eff)`:
+Key outputs per `(length, base_index, D_eff)`: 
 
 - Tail energy sum and norm, plus theoretical bound \(\Delta_{\text{th}}=2\sqrt{\sum_t\epsilon_t^2}\);
 - State error \(\delta_\psi=\|\psi-\tilde\psi\|_2\);
 - Hankel Frobenius and spectral differences using a fixed cut at \(t_*=\lfloor L/2\rfloor\);
 - Effective ranks at user tolerances and at \(\varepsilon\in\{\Delta_{\text{th}},\,\|H-\tilde H\|_2\}\),
   together with success flags for \(\operatorname{rank}_\varepsilon(H)\le D_\text{eff}^2\).
+
+## Running Experiment 3
+
+Experiment 3 evaluates length-dependent error growth under spectrally bounded
+gate noise and contrasts raw QCBM dynamics with a row-substochastic projection
+that enforces the contractive setting of Theorems 5.5/8.1.
+
+```bash
+python experiments/exp3_noise_growth.py \
+  --lengths 5,10,15,20 \
+  --bond-dim 4 \
+  --bases 20 \
+  --epsilons 0.001,0.003,0.01 \
+  --max-prefixes 256 \
+  --seed 0 \
+  --output experiments/exp3_results.csv
+```
+
+Protocol highlights:
+- Clean left-canonical MPS sampled per length with fixed bond dimension.
+- Per-gate complex Gaussian perturbations rescaled to a chosen spectral norm
+  `epsilon`.
+- Hankel matrices built from sampled prefix/suffix sets (capped by
+  `--max-prefixes`) using the exact probabilities of the selected sequences.
+- Projection path: `B = A ⊗ conj(A)` → elementwise absolute value → per-row
+  rescaling across symbols so that `Σσ Bσ 1 ≤ 1`, then surrogate probabilities
+  from a fixed `(i, f)` pair.
+
+The CSV reports spectral/Frobenius differences for both the raw and projected
+models, indexed by `(length, base_index, epsilon)` along with the actual prefix
+and suffix sample sizes.
