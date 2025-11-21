@@ -188,3 +188,37 @@ Key metrics per row:
 These outputs allow a direct check of Theorem 8.7: the joint `sigma_r` should
 exceed the single-view values, and the empirical joint conditioning and
 pointwise errors stabilize with the same samples used per view.
+
+## Running Experiment 7
+
+Experiment 7 instantiates the mixed-state/POVM Hankel-rank test from §12.1,
+following the expanded brief:
+
+- MPDO core: shallow noisy-channel MPDO with bond dimension `chi_rho` (default
+  {2,4}) and configurable depth.
+- POVMs: either separable projective (`chi_M=1`) or shallow correlated
+  networks (`chi_M>1`) with configurable depth/bond and noise.
+- Lengths `L` in {6,8,10} (default) with mid-cut Hankel built from
+  `P=Σ^{t*}` and `S=Σ^{L-t*}` where `t*=floor(L/2)`. Larger cuts ensure
+  `|P|,|S| >= chi_rho*chi_M` so the rank cap is visible.
+- Metrics: numerical rank with relative threshold, effective rank
+  (`effective_rank`), relative effective ranks at `1e-2`/`1e-3`, and
+  `rank_cap=min(|P|,|S|, chi_rho*chi_M)` plus a `within_cap` indicator.
+
+```bash
+python experiments/exp7_mpdo_povm.py \
+  --lengths 6,8,10 \
+  --chi-rho 2,4 \
+  --chi-m 1,2,4 \
+  --trials 30 \
+  --d 2 \
+  --mpdo-depth 3 --meas-depth 2 --noise 0.1 \
+  --tol-abs 1e-12 --tol-rel 1e-10 \
+  --seed 0 \
+  --output experiments/exp7_results.csv
+```
+
+CSV columns include the configuration, measured Hankel rank, bound
+(`rank_upper`) and dimension cap (`rank_cap`), `within_cap` flag, effective
+ranks (`effective_rank`, `r_eff_1e2`, `r_eff_1e3`), and thresholded singular
+value summaries (`sv_max`, `sv_min_thresholded`, `threshold`).
