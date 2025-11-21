@@ -1,9 +1,5 @@
 # QCBM-Hankel
 
-This repository contains a standalone implementation of the expanded Experiment 1
-plan: verifying how MPS bond dimension controls the Hankel rank of amplitude
-and probability Hankel matrices.
-
 ## Running Experiment 1
 
 The script is dependency-free and performs the full protocol:
