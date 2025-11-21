@@ -14,12 +14,7 @@ The script is dependency-free and performs the full protocol:
 * record raw ranks plus normalised ratios and full-rank frequencies.
 
 ```bash
-python experiments/exp1_mps_rank.py \
-  --random-samples 10 \
-  --structured-samples 2 \
-  --seed 42 \
-  --tol 1e-8 \
-  --output experiments/exp1_results.csv
+python experiments/exp1_mps_rank.py --random-samples 10 --structured-samples 2 --seed 42 --tol 1e-8 --output experiments/exp1_results.csv
 ```
 
 Key CLI options:
@@ -44,14 +39,7 @@ bond dimension, and the script tracks tail energies, state and Hankel errors,
 and effective ranks at theory-driven tolerances.
 
 ```bash
-python experiments/exp2_truncation.py \
-  --lengths 8,10,12 \
-  --bond-max 8 \
-  --bases 5 \
-  --epsilons 1e-12,1e-10,1e-8,1e-6 \
-  --depth-scale 1.0 \
-  --seed 0 \
-  --output experiments/exp2_results.csv
+python experiments/exp2_truncation.py --lengths 8,10,12 --bond-max 8 --bases 5 --epsilons 1e-12,1e-10,1e-8,1e-6 --depth-scale 1.0 --seed 0 --output experiments/exp2_results.csv
 ```
 
 Key outputs per `(length, base_index, D_eff)`: 
@@ -69,14 +57,7 @@ gate noise and contrasts raw QCBM dynamics with a row-substochastic projection
 that enforces the contractive setting of Theorems 5.5/8.1.
 
 ```bash
-python experiments/exp3_noise_growth.py \
-  --lengths 5,10,15,20 \
-  --bond-dim 4 \
-  --bases 20 \
-  --epsilons 0.001,0.003,0.01 \
-  --max-prefixes 256 \
-  --seed 0 \
-  --output experiments/exp3_results.csv
+python experiments/exp3_noise_growth.py --lengths 5,10,15,20 --bond-dim 4 --bases 20 --epsilons 0.001,0.003,0.01 --max-prefixes 256 --seed 0 --output experiments/exp3_results.csv
 ```
 
 Protocol highlights:
