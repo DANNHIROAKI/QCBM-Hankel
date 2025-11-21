@@ -119,3 +119,35 @@ the empirical Hankel used for whitening, and downstream spectral-learning
 metrics: total-variation and pointwise max error of the WFA-style reconstruction
 over all length-`L` strings. The contrast between the rank-1 and rank-3 cases
 highlights the `N \gtrsim \mu/\sigma_{\min}^2` dependence from §7.3.
+
+## Running Experiment 5
+
+Experiment 5 implements the end-to-end Hankel spectral-learning pipeline from
+Chs. 9–11, sweeping sample sizes and sequence lengths while comparing raw
+spectral recovery against a row-substochastic projection that enforces the
+contractive regime (`G_L(κ)≈L`). The expanded version supports multiple ground
+truths (low-rank MPS, higher-entropy MPS, and a contractive WFA), records
+coherence/`gamma`/`kappa_B`, and reports scaled errors `gamma/F(L)` to match the
+theoretical bound.
+
+```bash
+python experiments/exp5_sample_complexity.py \
+  --lengths 8,10 \
+  --sample-sizes 1000,3000,10000 \
+  --models low,high,contractive \
+  --bond-low 2 \
+  --bond-high 4 \
+  --wfa-dim 3 \
+  --rank 4 \
+  --trials 5 \
+  --seed 0 \
+  --output experiments/exp5_results.csv
+```
+
+Per configuration `(model, length, sample_size, trial)` the script records true
+rank, `gamma`, coherence `mu`, `kappa_B`, Hankel deviation `delta_hankel`,
+empirical `sigma_min`, and downstream errors (TV and max) for both the raw WFA
+and the contractive projection. Scaled errors (`scaled_error_* = error *
+gamma / F(L)`) and the prefix/suffix/evaluation sizes are included to facilitate
+the 5a/5b analyses (error vs. `N`, error vs. `L`) under both geometric and
+contractive regimes.

@@ -1,0 +1,2 @@
+model,length,sample_size,trial,rank_true,rank_used,delta_hankel,sigma_min_true,sigma_min_emp,mu,kappa_B,F_raw,max_error_raw,tv_error_raw,max_error_proj,tv_error_proj,scaled_error_raw,scaled_error_proj,prefixes,suffixes,eval_words
+low,4,50,1,4,2,0.10895280794093429,0.000409649121280138,0.10100895266391297,0.5647642469245377,0.9994885975037557,3.9938663079002334,0.33447061597804484,0.4905489772070208,0.33447061597804484,0.5000000000000002,3.43065048668262e-05,3.425389848235814e-05,4,4,16
