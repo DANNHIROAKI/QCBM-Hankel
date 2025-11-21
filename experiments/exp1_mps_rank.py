@@ -448,3 +448,7 @@ if __name__ == "__main__":
         seed=args.seed,
         output_path=args.output,
     )
+
+"""
+python experiments/exp1_mps_rank.py --random-samples 10 --structured-samples 2 --seed 42 --tol 1e-8 --output experiments/exp1_results.csv
+"""

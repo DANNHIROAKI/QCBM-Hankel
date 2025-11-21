@@ -53,7 +53,7 @@ gate noise and contrasts raw QCBM dynamics with a row-substochastic projection
 that enforces the contractive setting of Theorems 5.5/8.1.
 
 ```bash
-python experiments/exp3_noise_growth.py --lengths 5,10,15,20 --bond-dim 4 --bases 20 --epsilons 0.001,0.003,0.01 --max-prefixes 256 --seed 0 --output experiments/exp3_results.csv
+python experiments/exp3_noise_growth.py --lengths 5,10 --bond-dim 4 --bases 3 --epsilons 0.001,0.003,0.01 --max-prefixes 64 --seed 0 --output experiments/exp3_results.csv
 ```
 
 Protocol highlights:
@@ -79,14 +79,7 @@ masked transitions) on finite samples to expose how conditioning impacts sample
 complexity.
 
 ```bash
-python experiments/exp4_condition_numbers.py \
-  --lengths 6,10,14 \
-  --eta 0.6 \
-  --c-param 0.5 \
-  --sample-sizes 200,1000,5000 \
-  --trials 5 \
-  --seed 0 \
-  --output experiments/exp4_results.csv
+python experiments/exp4_condition_numbers.py --lengths 6,10,14 --eta 0.6 --c-param 0.5 --sample-sizes 200,1000,5000 --trials 5 --seed 0 --output experiments/exp4_results.csv
 ```
 
 Outputs per `(model, length, sample_size, trial)` include the leading three
@@ -108,17 +101,7 @@ coherence/`gamma`/`kappa_B`, and reports scaled errors `gamma/F(L)` to match the
 theoretical bound.
 
 ```bash
-python experiments/exp5_sample_complexity.py \
-  --lengths 8,10 \
-  --sample-sizes 1000,3000,10000 \
-  --models low,high,contractive \
-  --bond-low 2 \
-  --bond-high 4 \
-  --wfa-dim 3 \
-  --rank 4 \
-  --trials 5 \
-  --seed 0 \
-  --output experiments/exp5_results.csv
+python experiments/exp5_sample_complexity.py --lengths 8,10 --sample-sizes 1000,3000,10000 --models low,high,contractive --bond-low 2 --bond-high 4 --wfa-dim 3 --rank 4 --trials 5 --seed 0 --output experiments/exp5_results.csv
 ```
 
 Per configuration `(model, length, sample_size, trial)` the script records true
@@ -140,17 +123,7 @@ resulting pointwise/TV reconstruction errors for both single-view and
 multi-view whitening.
 
 ```bash
-python experiments/exp6_multi_view.py \
-  --lengths 6,6,6 \
-  --cuts 2,3,4 \
-  --sample-sizes 500,2000 \
-  --bond-dim 3 \
-  --max-prefixes 128 \
-  --max-suffixes 128 \
-  --rank 4 \
-  --trials 3 \
-  --seed 0 \
-  --output experiments/exp6_results.csv
+python experiments/exp6_multi_view.py --lengths 6,6,6 --cuts 2,3,4 --sample-sizes 500,2000 --bond-dim 3 --max-prefixes 128 --max-suffixes 128 --rank 4 --trials 3 --seed 0 --output experiments/exp6_results.csv
 ```
 
 Key metrics per row:
@@ -183,16 +156,7 @@ following the expanded brief:
   `rank_cap=min(|P|,|S|, chi_rho*chi_M)` plus a `within_cap` indicator.
 
 ```bash
-python experiments/exp7_mpdo_povm.py \
-  --lengths 6,8,10 \
-  --chi-rho 2,4 \
-  --chi-m 1,2,4 \
-  --trials 30 \
-  --d 2 \
-  --mpdo-depth 3 --meas-depth 2 --noise 0.1 \
-  --tol-abs 1e-12 --tol-rel 1e-10 \
-  --seed 0 \
-  --output experiments/exp7_results.csv
+python experiments/exp7_mpdo_povm.py --lengths 6,8,10 --chi-rho 2,4 --chi-m 1,2,4 --trials 30 --d 2 --mpdo-depth 3 --meas-depth 2 --noise 0.1 --tol-abs 1e-12 --tol-rel 1e-10 --seed 0 --output experiments/exp7_results.csv
 ```
 
 CSV columns include the configuration, measured Hankel rank, bound
@@ -208,20 +172,7 @@ both contrasting classical frequency estimates with QAE-style estimates whose
 variance shrinks as \(1/K^2\):
 
 ```bash
-python experiments/exp8_qae_scaling.py \
-  --lengths 6,8 \
-  --d 2 \
-  --bond-dim 3 \
-  --sample-size 5000 \
-  --qae-rounds 1,2,4,8,16,32 \
-  --trials 20 \
-  --amplitude-probs 0.15,0.35 \
-  --amplitude-shots 1000 \
-  --amplitude-trials 500 \
-  --noise-scale 1.0 \
-  --bias-scale 0.0 \
-  --seed 0 \
-  --output experiments/exp8_results.csv
+python experiments/exp8_qae_scaling.py --lengths 6,8 --d 2 --bond-dim 3 --sample-size 5000 --qae-rounds 1,2,4,8,16,32 --trials 20 --amplitude-probs 0.15,0.35 --amplitude-shots 1000 --amplitude-trials 500 --noise-scale 1.0 --bias-scale 0.0 --seed 0 --output experiments/exp8_results.csv
 ```
 
 What gets logged:

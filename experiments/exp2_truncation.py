@@ -1,22 +1,37 @@
-"""Expanded Experiment 2: truncation error vs. Hankel effective rank.
-
-Pure-Python implementation (no external dependencies) that follows the
-extended specification: generate base states from random brickwork two-qubit
-circuits, perform TT-SVD with controllable bond caps, build fixed-cut Hankel
-matrices, and measure tail energies, state/Hankel errors, and effective ranks
-at theory-driven tolerances.
-"""
-
 from __future__ import annotations
+
+"""
+Experiment 2 (strengthened): truncation error vs. Hankel effective rank.
+
+- Base states: random brickwork Haar two-qubit circuits on L qubits.
+- Compression: TT-SVD with exact dense SVD (via NumPy) and bond cap D_eff.
+- Hankel: fixed mid-cut (t_star = floor(L/2)) so each length-L string
+  appears exactly once in H_p.
+- Metrics per (length, base_index, D_eff):
+    * Tail energy: per-bond Frobenius tail eps_t^2 from SVD;
+      E_tail = sqrt(sum_t eps_t^2).
+    * State error: delta_psi = ||psi - psi_tilde||_2.
+    * Probability error: ||p - p_tilde||_2.
+    * Hankel Frobenius/spec differences: ||H - H_tilde||_F and ||H - H_tilde||_2.
+    * Effective ranks at theory-driven tolerances:
+          eps = Delta_th = 2 * E_tail
+          eps = ||H - H_tilde||_2
+      using an SVD-based definition: rank_eps(H) = # {sigma_i >= eps}.
+"""
 
 import argparse
 import csv
 import math
 import random
 from dataclasses import dataclass
-from typing import List, Sequence
+from typing import Dict, List, Sequence
 
-SequenceType = List[int]
+import numpy as np
+
+
+# ---------------------------------------------------------------------------
+# CLI helpers
+# ---------------------------------------------------------------------------
 
 
 def parse_int_list(text: str) -> List[int]:
@@ -28,297 +43,274 @@ def parse_float_list(text: str) -> List[float]:
 
 
 # ---------------------------------------------------------------------------
-# Basic linear algebra helpers (complex lists)
+# Basic helpers
 # ---------------------------------------------------------------------------
 
 
-def vec_add(u: List[complex], v: List[complex]) -> List[complex]:
-    return [a + b for a, b in zip(u, v)]
-
-
-def vec_sub(u: List[complex], v: List[complex]) -> List[complex]:
-    return [a - b for a, b in zip(u, v)]
-
-
-def vec_scale(u: List[complex], s: complex) -> List[complex]:
-    return [s * x for x in u]
-
-
-def dot(u: List[complex], v: List[complex]) -> complex:
-    return sum(a.conjugate() * b for a, b in zip(u, v))
-
-
-def norm(u: List[complex]) -> float:
-    return math.sqrt(sum(abs(x) ** 2 for x in u))
-
-
-def normalize(u: List[complex]) -> List[complex]:
-    n = norm(u)
-    if n == 0:
-        return u[:]
-    return [x / n for x in u]
-
-
-def matvec(mat: List[List[complex]], vec: List[complex]) -> List[complex]:
-    out: List[complex] = []
-    for row in mat:
-        out.append(sum(a * b for a, b in zip(row, vec)))
-    return out
-
-
-def conj_transpose(mat: List[List[complex]]) -> List[List[complex]]:
-    rows, cols = len(mat), len(mat[0])
-    return [[mat[i][j].conjugate() for i in range(rows)] for j in range(cols)]
-
-
-def outer(u: List[complex], v: List[complex]) -> List[List[complex]]:
-    return [[a * b.conjugate() for b in v] for a in u]
-
-
-def random_unitary_4() -> List[List[complex]]:
-    cols = []
-    for _ in range(4):
-        col = [random.gauss(0, 1) + 1j * random.gauss(0, 1) for _ in range(4)]
-        for prev in cols:
-            proj = dot(prev, col)
-            col = vec_sub(col, vec_scale(prev, proj))
-        col = normalize(col)
-        cols.append(col)
-    return [[cols[j][i] for j in range(4)] for i in range(4)]
-
-
-def power_iteration_spec_norm(mat: List[List[float]], iters: int = 25) -> float:
-    if not mat or not mat[0]:
-        return 0.0
-    n = len(mat[0])
-    v = [random.random() for _ in range(n)]
-    v = normalize(v)
-    for _ in range(iters):
-        Av = matvec(mat, v)
-        v = normalize(Av)
-    Av = matvec(mat, v)
-    return norm(Av)
+def normalize_state(state: np.ndarray) -> np.ndarray:
+    """L2-normalise a complex state vector."""
+    nrm = np.linalg.norm(state.ravel())
+    if nrm == 0.0:
+        return state
+    return state / nrm
 
 
 # ---------------------------------------------------------------------------
-# TT-SVD and tensor utilities (pure Python, truncated power-iteration SVD)
+# Random 2-qubit gates and brickwork circuits
 # ---------------------------------------------------------------------------
 
 
-def reshape_flat_to_matrix(flat: List[complex], rows: int) -> List[List[complex]]:
-    cols = len(flat) // rows
-    return [flat[i * cols : (i + 1) * cols] for i in range(rows)]
+def random_unitary_4(rng: np.random.Generator) -> np.ndarray:
+    """
+    Sample a random 4x4 unitary from the Haar measure via QR decomposition.
+    """
+    # Complex Ginibre matrix
+    z = rng.normal(size=(4, 4)) + 1j * rng.normal(size=(4, 4))
+    q, r = np.linalg.qr(z)
+    # Fix phases on the diagonal of R
+    diag = np.diag(r)
+    phases = diag / np.abs(diag)
+    u = q * phases
+    return u.astype(np.complex128)
 
 
-def flatten_matrix(mat: List[List[complex]]) -> List[complex]:
-    return [elem for row in mat for elem in row]
+def apply_two_qubit_gate(
+    state: np.ndarray, gate: np.ndarray, i: int, L: int
+) -> None:
+    """
+    Apply a 4x4 two-qubit gate on qubits (i, i+1) to the full state vector.
 
-
-def truncated_svd(matrix: List[List[complex]], max_rank: int):
-    m = len(matrix)
-    n = len(matrix[0]) if matrix else 0
-    working = [row[:] for row in matrix]
-    frob = sum(abs(x) ** 2 for row in working for x in row)
-    singulars: List[float] = []
-    left_vecs: List[List[complex]] = []
-    right_vecs: List[List[complex]] = []
-    for _ in range(min(max_rank, m, n)):
-        v = normalize([random.gauss(0, 1) + 1j * random.gauss(0, 1) for _ in range(n)])
-        if norm(v) < 1e-14:
-            break
-        for _ in range(40):
-            Av = matvec(working, v)
-            normAv = norm(Av)
-            if normAv < 1e-12:
-                break
-            u = [x / normAv for x in Av]
-            Atu = matvec(conj_transpose(working), u)
-            normAtu = norm(Atu)
-            if normAtu < 1e-12:
-                break
-            v = [x / normAtu for x in Atu]
-        Av = matvec(working, v)
-        sigma = norm(Av)
-        if sigma < 1e-12:
-            break
-        u = [x / sigma for x in Av]
-        singulars.append(sigma)
-        left_vecs.append(u)
-        right_vecs.append(v)
-        uv = outer(u, v)
-        for i in range(m):
-            for j in range(n):
-                working[i][j] -= sigma * uv[i][j]
-    if not singulars:
-        singulars.append(0.0)
-        base_u = [1.0] + [0.0 for _ in range(max(0, m - 1))]
-        base_v = [1.0] + [0.0 for _ in range(max(0, n - 1))]
-        left_vecs.append(base_u[:m])
-        right_vecs.append(base_v[:n])
-    kept_energy = sum(s * s for s in singulars)
-    tail_energy = max(frob - kept_energy, 0.0)
-
-    U_matrix = [[0.0j for _ in range(len(singulars))] for _ in range(m)]
-    for col, u in enumerate(left_vecs):
-        for i, val in enumerate(u):
-            U_matrix[i][col] = val
-    Vh = [[val.conjugate() for val in v] for v in right_vecs]
-    SVh = []
-    for s, row in zip(singulars, Vh):
-        SVh.append([s * x for x in row])
-    return singulars, U_matrix, SVh, tail_energy
-
-
-@dataclass
-class TTSVDResult:
-    cores: List[List[List[List[complex]]]]
-    tail_energies: List[float]
-    singulars: List[List[float]]
-
-
-def tt_svd(state_flat: List[complex], d: int, length: int, max_rank: int) -> TTSVDResult:
-    cores: List[List[List[List[complex]]]] = []
-    tail_energies: List[float] = []
-    singulars: List[List[float]] = []
-    remaining = state_flat[:]
-    left_rank = 1
-    for _ in range(length - 1):
-        rows = left_rank * d
-        matrix = reshape_flat_to_matrix(remaining, rows)
-        s, U, SVh, tail = truncated_svd(matrix, max_rank)
-        keep = len(s)
-        tail_energies.append(tail)
-        singulars.append(s)
-        core = [[[0.0j for _ in range(keep)] for _ in range(d)] for _ in range(left_rank)]
-        for i in range(left_rank):
-            for a in range(d):
-                for k in range(keep):
-                    core[i][a][k] = U[i * d + a][k]
-        cores.append(core)
-        remaining = flatten_matrix(SVh)
-        left_rank = keep
-    final_core: List[List[List[complex]]] = [[[0.0j] for _ in range(d)] for _ in range(left_rank or 1)]
-    if left_rank == 0:
-        left_rank = 1
-    for i in range(left_rank):
-        for a in range(d):
-            idx = i * d + a
-            if idx < len(remaining):
-                final_core[i][a][0] = remaining[idx]
-    cores.append(final_core)
-    tail_energies.append(0.0)
-    singulars.append([])
-    return TTSVDResult(cores, tail_energies, singulars)
-
-
-def generate_sequences(length: int, d: int) -> List[List[int]]:
-    if length == 0:
-        return [[]]
-    sequences = [[0] * length for _ in range(d**length)]
-    for idx in range(d**length):
-        val = idx
-        for pos in range(length - 1, -1, -1):
-            sequences[idx][pos] = val % d
-            val //= d
-    return sequences
-
-
-def amplitude_from_cores(seq: Sequence[int], cores: Sequence[Sequence[Sequence[Sequence[complex]]]]) -> complex:
-    vec: List[complex] = [1.0 + 0.0j]
-    for site, sym in enumerate(seq):
-        core = cores[site]
-        next_vec: List[complex] = []
-        for j in range(len(core[0][sym])):
-            total = 0.0j
-            for i, val in enumerate(vec):
-                total += val * core[i][sym][j]
-            next_vec.append(total)
-        vec = next_vec
-    return vec[0] if vec else 0.0j
-
-
-def amplitudes_from_cores(cores: Sequence[Sequence[Sequence[Sequence[complex]]]], length: int, d: int) -> List[complex]:
-    seqs = generate_sequences(length, d)
-    return [amplitude_from_cores(seq, cores) for seq in seqs]
-
-
-# ---------------------------------------------------------------------------
-# Quantum circuit state preparation
-# ---------------------------------------------------------------------------
-
-
-def apply_two_qubit_gate(state: List[complex], gate: List[List[complex]], i: int, L: int) -> None:
+    Qubits are numbered [0, ..., L-1] from least significant upward.
+    The state is a length-2^L vector in the computational basis.
+    """
+    dim = 1 << L
     step = 1 << i
-    block = step << 2
-    size = 1 << L
-    for base in range(0, size, block):
+    block = step << 2  # 4 * step
+
+    for base in range(0, dim, block):
         for offset in range(step):
             idx0 = base + offset
             idx1 = idx0 + step
             idx2 = idx0 + 2 * step
             idx3 = idx0 + 3 * step
-            vec = [state[idx0], state[idx1], state[idx2], state[idx3]]
-            new = [0.0j, 0.0j, 0.0j, 0.0j]
-            for r in range(4):
-                new[r] = sum(gate[r][c] * vec[c] for c in range(4))
-            state[idx0], state[idx1], state[idx2], state[idx3] = new
+
+            vec = np.array(
+                [state[idx0], state[idx1], state[idx2], state[idx3]],
+                dtype=np.complex128,
+            )
+            new_vec = gate @ vec
+            state[idx0], state[idx1], state[idx2], state[idx3] = new_vec
 
 
-def random_brickwork_state(length: int, depth: int) -> List[complex]:
-    state = [0.0j for _ in range(1 << length)]
+def random_brickwork_state(
+    length: int, depth: int, rng: np.random.Generator
+) -> np.ndarray:
+    """
+    Prepare a random brickwork Haar-2qubit circuit state on L qubits.
+
+    Initial state: |0...0>.
+    Depth: number of brickwork layers (alternating even/odd pairs).
+    """
+    dim = 1 << length
+    state = np.zeros(dim, dtype=np.complex128)
     state[0] = 1.0 + 0.0j
+
     for layer in range(depth):
         offset = layer % 2
         for i in range(offset, length - 1, 2):
-            gate = random_unitary_4()
+            gate = random_unitary_4(rng)
             apply_two_qubit_gate(state, gate, i, length)
-    state = normalize(state)
-    return state
+
+    return normalize_state(state)
 
 
 # ---------------------------------------------------------------------------
-# Hankel construction and ranks
+# TT-SVD (MPS) with exact dense SVD
 # ---------------------------------------------------------------------------
 
 
-def hankel_from_probs(probs: List[float], length: int, t_star: int) -> List[List[float]]:
+@dataclass
+class TTSVDResult:
+    cores: List[np.ndarray]          # list of cores, each shape (r_left, d, r_right)
+    tail_energies: List[float]       # eps_t^2 at each bond
+    singulars: List[np.ndarray]      # kept singular values at each bond
+
+
+def tt_svd(
+    state_flat: np.ndarray, d: int, length: int, bond_max: int
+) -> TTSVDResult:
+    """
+    Tensor-train (MPS) factorisation of a length-L, d^L-dimensional state.
+
+    Standard TT-SVD sweep:
+        - reshape into (r_left * d) x (rest) at each step,
+        - exact SVD with NumPy,
+        - truncate to rank ≤ bond_max,
+        - reshape left singulars into a TT core and propagate S * Vh.
+
+    At step t, tail_energies[t] stores the Frobenius tail eps_t^2
+    (sum of squared discarded singular values). Then
+
+        E_tail = sqrt(sum_t eps_t^2)
+
+    is the canonical TT-SVD bound on ||psi - psi_trunc||_2.
+    """
+    state = state_flat.reshape(-1).astype(np.complex128)
+    cores: List[np.ndarray] = []
+    tail_energies: List[float] = []
+    singulars: List[np.ndarray] = []
+
+    remaining = state
+    r_left = 1
+
+    for _ in range(length - 1):
+        rows = r_left * d
+        matrix = remaining.reshape(rows, -1)
+
+        # Full SVD (thin)
+        U, S, Vh = np.linalg.svd(matrix, full_matrices=False)
+        # Truncate rank
+        keep = min(bond_max, S.size)
+        U_k = U[:, :keep]
+        S_k = S[:keep]
+        Vh_k = Vh[:keep, :]
+
+        # Tail energy eps_t^2 = sum_{i>keep} S_i^2
+        tail = float(np.sum(S[keep:] ** 2))
+        tail_energies.append(tail)
+        singulars.append(S_k.copy())
+
+        # Core: reshape U_k into (r_left, d, keep)
+        core = U_k.reshape(r_left, d, keep)
+        cores.append(core)
+
+        # Propagate S_k Vh_k
+        remaining = (S_k[:, None] * Vh_k).reshape(-1)
+        r_left = keep
+
+    # Final core absorbs the last physical site
+    final_core = remaining.reshape(r_left, d, 1)
+    cores.append(final_core)
+    tail_energies.append(0.0)
+    singulars.append(np.array([], dtype=float))
+
+    return TTSVDResult(cores=cores, tail_energies=tail_energies, singulars=singulars)
+
+
+# ---------------------------------------------------------------------------
+# Contract TT cores to recover amplitudes
+# ---------------------------------------------------------------------------
+
+
+def generate_sequences(length: int, d: int) -> List[List[int]]:
+    """
+    Enumerate all length-L strings over alphabet {0, ..., d-1}.
+
+    Strings are ordered lexicographically in base-d.
+    """
+    if length == 0:
+        return [[]]
+    out = [[0] * length for _ in range(d**length)]
+    for idx in range(d**length):
+        val = idx
+        for pos in range(length - 1, -1, -1):
+            out[idx][pos] = val % d
+            val //= d
+    return out
+
+
+def amplitude_from_cores(seq: Sequence[int], cores: Sequence[np.ndarray]) -> complex:
+    """
+    Contract TT cores along a single sequence to get psi(seq).
+    cores[s] has shape (r_left, d, r_right).
+    """
+    vec = np.array([1.0 + 0.0j], dtype=np.complex128)  # shape (1,)
+    for site, sym in enumerate(seq):
+        core = cores[site]  # (r_left, d, r_right)
+        # slice for the chosen physical symbol: (r_left, r_right)
+        slice_sym = core[:, sym, :]
+        vec = vec @ slice_sym  # (1, r_left) @ (r_left, r_right) -> (r_right,)
+    return complex(vec[0]) if vec.size > 0 else 0.0 + 0.0j
+
+
+def amplitudes_from_cores(
+    cores: Sequence[np.ndarray], length: int, d: int
+) -> np.ndarray:
+    """
+    Compute psi(x) for all x in Σ^L from TT cores.
+
+    Returns a complex vector of length d^L, matching the sequence ordering
+    in generate_sequences.
+    """
+    seqs = generate_sequences(length, d)
+    amps = np.empty(len(seqs), dtype=np.complex128)
+    for idx, seq in enumerate(seqs):
+        amps[idx] = amplitude_from_cores(seq, cores)
+    return amps
+
+
+# ---------------------------------------------------------------------------
+# Hankel construction and SVD-based effective rank
+# ---------------------------------------------------------------------------
+
+
+def hankel_from_probs(
+    probs: np.ndarray, length: int, t_star: int
+) -> np.ndarray:
+    """
+    Build mid-cut Hankel H(u,v)=p(uv) with P=Σ^{t_star}, S=Σ^{L-t_star}.
+
+    We index strings by their integer code in binary (qubit 0 is least
+    significant bit), and split each integer x into a prefix u and suffix v:
+        x = u * 2^{L-t_star} + v.
+
+    This matches the indexing of random_brickwork_state. Each length-L string
+    appears exactly once in H.
+    """
     rows = 1 << t_star
     cols = 1 << (length - t_star)
-    mat: List[List[float]] = []
+    H = np.empty((rows, cols), dtype=float)
     for r in range(rows):
-        row: List[float] = []
         base = r << (length - t_star)
-        for c in range(cols):
-            row.append(probs[base + c])
-        mat.append(row)
-    return mat
+        H[r, :] = probs[base : base + cols]
+    return H
 
 
-def frob_norm(mat: List[List[float]]) -> float:
-    return math.sqrt(sum(val * val for row in mat for val in row))
+def frob_norm(mat: np.ndarray) -> float:
+    return float(np.linalg.norm(mat, ord="fro"))
 
 
-def mat_sub(a: List[List[float]], b: List[List[float]]) -> List[List[float]]:
-    return [[x - y for x, y in zip(row_a, row_b)] for row_a, row_b in zip(a, b)]
+def spectral_norm(mat: np.ndarray) -> float:
+    """
+    Spectral norm ||mat||_2 = largest singular value.
+    """
+    if mat.size == 0:
+        return 0.0
+    svals = np.linalg.svd(mat, compute_uv=False)
+    return float(svals[0]) if svals.size > 0 else 0.0
 
 
-def effective_rank(matrix: List[List[float]], eps: float) -> int:
-    if not matrix:
-        return 0
-    basis: List[List[float]] = []
-    for row in matrix:
-        proj = row[:]
-        for b in basis:
-            dot_rb = sum(p * bb for p, bb in zip(proj, b))
-            proj = [p - dot_rb * bb for p, bb in zip(proj, b)]
-        n = math.sqrt(sum(p * p for p in proj))
-        if n >= eps:
-            basis.append([p / n for p in proj])
-    return len(basis)
+def singular_values_real(mat: np.ndarray) -> np.ndarray:
+    """
+    Singular values of a real matrix, sorted descending.
+    """
+    if mat.size == 0:
+        return np.array([], dtype=float)
+    svals = np.linalg.svd(mat, compute_uv=False)
+    return svals.astype(float)
+
+
+def effective_rank_from_singulars(svals: np.ndarray, eps: float) -> int:
+    """
+    Effective rank at tolerance eps: number of singular values ≥ eps.
+    """
+    if eps <= 0.0:
+        return int(svals.size)
+    return int(np.sum(svals >= eps))
 
 
 # ---------------------------------------------------------------------------
-# Experiment driver
+# Main experiment driver
 # ---------------------------------------------------------------------------
 
 
@@ -331,119 +323,191 @@ def run_experiment(
     depth_scale: float,
     output: str,
 ) -> None:
+    # Seed both Python's RNG and NumPy's RNG for reproducibility
     random.seed(seed)
-    records = []
+    rng = np.random.default_rng(seed)
+
     d = 2
+    records: List[Dict[str, object]] = []
+
     for L in lengths:
         depth = max(1, int(depth_scale * L))
+        t_star = L // 2
+        print(f"[length={L}] brickwork depth = {depth}, t_star = {t_star}")
+
         for base_idx in range(num_bases):
-            base_state = random_brickwork_state(L, depth)
-            base_state = normalize(base_state)
-            base_tt = tt_svd(base_state, d, L, bond_max)
-            base_probs = [abs(x) ** 2 for x in base_state]
-            t_star = L // 2
-            base_hankel = hankel_from_probs(base_probs, L, t_star)
-            base_rank_full = effective_rank(base_hankel, 1e-12)
+            # 1) Base state and probabilities
+            base_state = random_brickwork_state(L, depth, rng)
+            base_probs = np.abs(base_state) ** 2
 
-            for D_eff in [bond_max, max(1, bond_max // 2), max(1, bond_max // 4)]:
-                trunc_tt = tt_svd(base_state, d, L, D_eff)
-                tail_sum = sum(trunc_tt.tail_energies)
-                tail_norm = math.sqrt(tail_sum)
-                delta_th = 2 * tail_norm
-                trunc_state = amplitudes_from_cores(trunc_tt.cores, L, d)
-                trunc_state = normalize(trunc_state)
-                delta_psi = norm(vec_sub(base_state, trunc_state))
-                trunc_probs = [abs(x) ** 2 for x in trunc_state]
-                trunc_hankel = hankel_from_probs(trunc_probs, L, t_star)
-                diff_hankel = mat_sub(base_hankel, trunc_hankel)
+            # 2) Base Hankel and its singular values
+            base_hankel = hankel_from_probs(base_probs, length=L, t_star=t_star)
+            base_svals = singular_values_real(base_hankel)
+            base_rank_full = effective_rank_from_singulars(base_svals, eps=1e-12)
+
+            # 3) Sweep effective bond dimensions
+            D_eff_values = sorted(
+                {bond_max, max(1, bond_max // 2), max(1, bond_max // 4)}
+            )
+
+            for D_eff in D_eff_values:
+                # TT-SVD compression from full base state
+                tt_res = tt_svd(base_state, d=d, length=L, bond_max=D_eff)
+
+                # Tail energies and theoretical Hankel bound
+                tail_energy_sum = float(np.sum(tt_res.tail_energies))
+                tail_energy_norm = math.sqrt(tail_energy_sum)
+                delta_th = 2.0 * tail_energy_norm
+
+                # Reconstruct truncated state and renormalise
+                trunc_state = amplitudes_from_cores(tt_res.cores, length=L, d=d)
+                trunc_state = normalize_state(trunc_state)
+                delta_psi = float(np.linalg.norm(base_state - trunc_state))
+
+                # Probability vector and L2 error
+                trunc_probs = np.abs(trunc_state) ** 2
+                prob_diff_l2 = float(np.linalg.norm(base_probs - trunc_probs))
+
+                # Hankel matrices and differences
+                trunc_hankel = hankel_from_probs(trunc_probs, length=L, t_star=t_star)
+                diff_hankel = base_hankel - trunc_hankel
                 diff_fro = frob_norm(diff_hankel)
-                diff_spec = power_iteration_spec_norm(diff_hankel)
-                eff_rank_delta_th = effective_rank(base_hankel, delta_th)
-                eff_rank_delta_spec = effective_rank(base_hankel, diff_spec)
+                diff_spec = spectral_norm(diff_hankel)
 
-                row = {
+                # Effective ranks (base Hankel) at theory-driven epsilons
+                rank_delta_th = effective_rank_from_singulars(
+                    base_svals, delta_th
+                )
+                rank_delta_spec = effective_rank_from_singulars(
+                    base_svals, diff_spec
+                )
+                success_delta_th = int(rank_delta_th <= D_eff ** 2)
+                success_delta_spec = int(rank_delta_spec <= D_eff ** 2)
+
+                # (Optional sanity: numeric rank of truncated Hankel at a tiny eps)
+                trunc_svals = singular_values_real(trunc_hankel)
+                trunc_rank_num = effective_rank_from_singulars(
+                    trunc_svals, eps=1e-10
+                )
+
+                row: Dict[str, object] = {
                     "length": L,
                     "base_index": base_idx,
                     "bond_max": bond_max,
                     "bond_eff": D_eff,
                     "depth": depth,
                     "t_star": t_star,
-                    "tail_energy_sum": tail_sum,
-                    "tail_energy_norm": tail_norm,
+                    # truncation / state-level metrics
+                    "tail_energy_sum": tail_energy_sum,
+                    "tail_energy_norm": tail_energy_norm,
                     "delta_th": delta_th,
                     "delta_psi": delta_psi,
+                    "delta_psi_over_tail": (
+                        delta_psi / tail_energy_norm if tail_energy_norm > 0 else 0.0
+                    ),
+                    # probability / Hankel metrics
+                    "prob_diff_l2": prob_diff_l2,
                     "hankel_diff_fro": diff_fro,
                     "hankel_diff_spec": diff_spec,
-                    "base_rank": base_rank_full,
-                    "rank_delta_th": eff_rank_delta_th,
-                    "rank_delta_spec": eff_rank_delta_spec,
-                    "rank_success_delta_th": int(eff_rank_delta_th <= D_eff**2),
-                    "rank_success_delta_spec": int(eff_rank_delta_spec <= D_eff**2),
+                    # base Hankel ranks
+                    "base_rank_full": base_rank_full,
+                    "rank_delta_th": rank_delta_th,
+                    "rank_delta_spec": rank_delta_spec,
+                    "rank_success_delta_th": success_delta_th,
+                    "rank_success_delta_spec": success_delta_spec,
+                    # truncated Hankel numeric rank at a tiny tolerance
+                    "trunc_rank_num_1e-10": trunc_rank_num,
                 }
 
+                # Ranks at user-specified epsilons (for both base and truncated Hankel)
                 for eps in epsilons:
-                    row[f"base_rank_eps_{eps:g}"] = effective_rank(base_hankel, eps)
-                    row[f"trunc_rank_eps_{eps:g}"] = effective_rank(trunc_hankel, eps)
+                    key_base = f"base_rank_eps_{eps:g}"
+                    key_trunc = f"trunc_rank_eps_{eps:g}"
+                    row[key_base] = effective_rank_from_singulars(base_svals, eps)
+                    row[key_trunc] = effective_rank_from_singulars(trunc_svals, eps)
 
                 records.append(row)
+
                 print(
-                    f"L={L}, base={base_idx}, D_eff={D_eff}: tail_norm={tail_norm:.3e}, "
-                    f"Delta_th={delta_th:.3e}, ||H||_2 diff≈{diff_spec:.3e}, rank<=D^2@th={row['rank_success_delta_th']}"
+                    f"  base={base_idx:02d}, D_eff={D_eff:2d}: "
+                    f"E_tail={tail_energy_norm:.3e}, "
+                    f"Delta_th={delta_th:.3e}, "
+                    f"||H-H_t||_2={diff_spec:.3e}, "
+                    f"rank<=D^2@th={success_delta_th}"
                 )
 
-    fieldnames = [
-        "length",
-        "base_index",
-        "bond_max",
-        "bond_eff",
-        "depth",
-        "t_star",
-        "tail_energy_sum",
-        "tail_energy_norm",
-        "delta_th",
-        "delta_psi",
-        "hankel_diff_fro",
-        "hankel_diff_spec",
-        "base_rank",
-        "rank_delta_th",
-        "rank_delta_spec",
-        "rank_success_delta_th",
-        "rank_success_delta_spec",
-    ]
-    for eps in epsilons:
-        fieldnames.append(f"base_rank_eps_{eps:g}")
-        fieldnames.append(f"trunc_rank_eps_{eps:g}")
+    # Write CSV output
+    if not records:
+        print("No records generated; nothing to save.")
+        return
 
+    fieldnames = list(records[0].keys())
     with open(output, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(records)
+        for row in records:
+            writer.writerow(row)
     print(f"Saved {len(records)} rows to {output}")
 
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run expanded Experiment 2: truncation vs Hankel effective rank")
-    parser.add_argument("--lengths", type=parse_int_list, default="8,10,12", help="Comma-separated sequence lengths")
-    parser.add_argument("--bond-max", type=int, default=8, help="Maximum bond dimension for base TT-SVD")
-    parser.add_argument("--bases", type=int, default=10, help="Number of base random circuits per length")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Experiment 2 (strengthened): truncation error vs. Hankel effective rank "
+            "(brickwork states + TT-SVD + mid-cut Hankel + SVD-based ranks)."
+        )
+    )
+    parser.add_argument(
+        "--lengths",
+        type=parse_int_list,
+        default="8,10,12",
+        help="Comma-separated sequence lengths, e.g. '8,10,12'.",
+    )
+    parser.add_argument(
+        "--bond-max",
+        type=int,
+        default=8,
+        help="Maximum bond dimension (D_max) for TT-SVD compression.",
+    )
+    parser.add_argument(
+        "--bases",
+        type=int,
+        default=10,
+        help="Number of random brickwork base states per length.",
+    )
     parser.add_argument(
         "--epsilons",
         type=parse_float_list,
         default="1e-12,1e-10,1e-8,1e-6",
-        help="Tolerances for effective-rank reporting",
+        help="Comma-separated tolerances for effective-rank reporting.",
     )
-    parser.add_argument("--seed", type=int, default=0, help="RNG seed")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="RNG seed for reproducibility.",
+    )
     parser.add_argument(
         "--depth-scale",
         type=float,
         default=1.0,
-        help="Brickwork depth multiplier (depth = depth_scale * L)",
+        help="Brickwork depth multiplier (depth = depth_scale * L).",
     )
-    parser.add_argument("--output", type=str, default="experiments/exp2_results.csv", help="CSV output path")
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="experiments/exp2_results.csv",
+        help="CSV output path.",
+    )
     return parser.parse_args()
 
 
-if __name__ == "__main__":
+def main() -> None:
     args = parse_args()
     run_experiment(
         lengths=args.lengths,
@@ -454,3 +518,14 @@ if __name__ == "__main__":
         depth_scale=args.depth_scale,
         output=args.output,
     )
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+"""
+python experiments/exp2_truncation.py --lengths 8,10,12 --bond-max 8 --bases 5 --epsilons 1e-12,1e-10,1e-8,1e-6 --depth-scale 1.0 --seed 0 --output experiments/exp2_results.csv
+"""
