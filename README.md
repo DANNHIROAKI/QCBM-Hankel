@@ -35,3 +35,29 @@ Key CLI options:
 
 After completion the script prints mean rank ratios and full-rank frequencies
 for random MPS, and writes all per-instance metrics to the CSV file.
+
+## Running Experiment 2
+
+Experiment 2 (expanded) follows the full truncation protocol in the plan:
+random brickwork Haar circuits produce base states, TT-SVD truncations cap the
+bond dimension, and the script tracks tail energies, state and Hankel errors,
+and effective ranks at theory-driven tolerances.
+
+```bash
+python experiments/exp2_truncation.py \
+  --lengths 8,10,12 \
+  --bond-max 8 \
+  --bases 5 \
+  --epsilons 1e-12,1e-10,1e-8,1e-6 \
+  --depth-scale 1.0 \
+  --seed 0 \
+  --output experiments/exp2_results.csv
+```
+
+Key outputs per `(length, base_index, D_eff)`:
+
+- Tail energy sum and norm, plus theoretical bound \(\Delta_{\text{th}}=2\sqrt{\sum_t\epsilon_t^2}\);
+- State error \(\delta_\psi=\|\psi-\tilde\psi\|_2\);
+- Hankel Frobenius and spectral differences using a fixed cut at \(t_*=\lfloor L/2\rfloor\);
+- Effective ranks at user tolerances and at \(\varepsilon\in\{\Delta_{\text{th}},\,\|H-\tilde H\|_2\}\),
+  together with success flags for \(\operatorname{rank}_\varepsilon(H)\le D_\text{eff}^2\).
