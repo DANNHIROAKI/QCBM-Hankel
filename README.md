@@ -151,3 +151,40 @@ and the contractive projection. Scaled errors (`scaled_error_* = error *
 gamma / F(L)`) and the prefix/suffix/evaluation sizes are included to facilitate
 the 5a/5b analyses (error vs. `N`, error vs. `L`) under both geometric and
 contractive regimes.
+
+## Running Experiment 6
+
+Experiment 6 tests the multi-view stacking result from §8.3 by comparing
+single-view Hankel conditioning to the jointly stacked Hankel across multiple
+cut “views” of the same ground-truth MPS (all views share the same length).
+The script reports true and empirical smallest singular values for each view
+and for the joint stacked matrix, coherences, Hankel deviations, and the
+resulting pointwise/TV reconstruction errors for both single-view and
+multi-view whitening.
+
+```bash
+python experiments/exp6_multi_view.py \
+  --lengths 6,6,6 \
+  --cuts 2,3,4 \
+  --sample-sizes 500,2000 \
+  --bond-dim 3 \
+  --max-prefixes 128 \
+  --max-suffixes 128 \
+  --rank 4 \
+  --trials 3 \
+  --seed 0 \
+  --output experiments/exp6_results.csv
+```
+
+Key metrics per row:
+
+- `mode=single_true`: per-view true `sigma_r`, coherence `mu`, and rank;
+- `mode=single_emp`: empirical `sigma_r`, Hankel deviation, and max/TV errors
+  for each view at a given sample size;
+- `mode=joint_true/emp`: smallest singular value of the stacked joint Hankel
+  (built from all views), its deviation from the true joint matrix, and the
+  aggregated multi-view prediction errors (averaged over the available cuts).
+
+These outputs allow a direct check of Theorem 8.7: the joint `sigma_r` should
+exceed the single-view values, and the empirical joint conditioning and
+pointwise errors stabilize with the same samples used per view.
